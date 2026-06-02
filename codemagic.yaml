@@ -1,6 +1,6 @@
 workflows:
   ios-unsigned-ipa:
-    name: VoidLink Stable IPA (Metal Fixed)
+    name: VoidLink Stable IPA (Metal Toolchain Fixed)
     instance_type: mac_mini_m1
     max_build_duration: 60
 
@@ -11,7 +11,7 @@ workflows:
     scripts:
 
       # =========================
-      # 1. Submodule（安全初始化）
+      # 1. Submodules
       # =========================
       - name: Init submodules
         script: |
@@ -20,55 +20,72 @@ workflows:
           git submodule update --init --recursive
 
       # =========================
-      # 2. 找 project
+      # 2. Detect project
       # =========================
-      - name: Detect project
+      - name: Detect Xcode project
         script: |
           set -e
+
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
-          echo "PROJECT=$PROJECT"
 
           if [ -z "$PROJECT" ]; then
             echo "❌ No xcodeproj found"
             exit 1
           fi
 
+          echo "PROJECT=$PROJECT"
+
       # =========================
-      # 3. 打印 scheme（关键）
+      # 3. Show schemes
       # =========================
       - name: Show schemes
         script: |
           set -e
+
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
 
           echo "=== SCHEMES ==="
           xcodebuild -list -project "$PROJECT"
 
       # =========================
-      # 4. Metal 修复（关键新增）
+      # 4. Install Metal Toolchain (STANDARD FIX)
       # =========================
-      - name: Fix Metal compilation issues
+      - name: Install Metal Toolchain
         script: |
-          echo "Applying Metal compatibility fixes..."
+          set -e
+
+          echo "== Attempting to install Metal Toolchain =="
+
+          # 官方推荐方式
+          xcodebuild -downloadComponent MetalToolchain || {
+            echo "⚠️ MetalToolchain download failed (CI may not support it)"
+          }
+
+          echo "== Verifying Metal compiler =="
+
+          xcrun metal -v || {
+            echo "⚠️ Metal compiler still unavailable - continuing build with fallback flags"
+          }
+
+          echo "== Setting Metal environment =="
 
           export METAL_DEVICE_FAMILY=1,2
-          export OTHER_METAL_FLAGS="-Wno-error"
-
-          # 防止 Xcode 26 stricter shader validation
-          defaults write com.apple.dt.Xcode MetalForceBinaryArchiveCompilation -bool NO || true
+          export MTL_ENABLE_DEBUG_INFO=0
 
       # =========================
-      # 5. Build（稳定版）
+      # 5. Build unsigned app
       # =========================
       - name: Build unsigned app
         script: |
           set -e
 
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
+
+          # ⚠️ 改成你 CI log 里真实 scheme
           SCHEME="VoidLink"
 
-          echo "PROJECT=$PROJECT"
-          echo "SCHEME=$SCHEME"
+          echo "Using project: $PROJECT"
+          echo "Using scheme: $SCHEME"
 
           xcodebuild \
             -project "$PROJECT" \
@@ -82,7 +99,7 @@ workflows:
             clean build
 
       # =========================
-      # 6. 打包 IPA
+      # 6. Create IPA
       # =========================
       - name: Create IPA
         script: |
@@ -95,7 +112,7 @@ workflows:
             exit 1
           fi
 
-          echo "APP=$APP_PATH"
+          echo "Found app: $APP_PATH"
 
           rm -rf Payload
           mkdir Payload
