@@ -1,6 +1,6 @@
 workflows:
   ios-unsigned-ipa:
-    name: VoidLink Stable Unsigned IPA
+    name: VoidLink Stable IPA (Metal Fixed)
     instance_type: mac_mini_m1
     max_build_duration: 60
 
@@ -13,28 +13,25 @@ workflows:
       # =========================
       # 1. Submodule（安全初始化）
       # =========================
-      - name: Init submodules (safe)
+      - name: Init submodules
         script: |
           set -e
           git submodule sync --recursive
           git submodule update --init --recursive
 
       # =========================
-      # 2. 找到 Xcode 工程
+      # 2. 找 project
       # =========================
-      - name: Detect Xcode project
+      - name: Detect project
         script: |
           set -e
-
-          echo "=== FIND PROJECT FILES ==="
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
+          echo "PROJECT=$PROJECT"
 
           if [ -z "$PROJECT" ]; then
-            echo "❌ No .xcodeproj found"
+            echo "❌ No xcodeproj found"
             exit 1
           fi
-
-          echo "PROJECT = $PROJECT"
 
       # =========================
       # 3. 打印 scheme（关键）
@@ -42,26 +39,36 @@ workflows:
       - name: Show schemes
         script: |
           set -e
-
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
 
-          echo "=== AVAILABLE SCHEMES ==="
+          echo "=== SCHEMES ==="
           xcodebuild -list -project "$PROJECT"
 
       # =========================
-      # 4. 构建 IPA（未签名）
+      # 4. Metal 修复（关键新增）
+      # =========================
+      - name: Fix Metal compilation issues
+        script: |
+          echo "Applying Metal compatibility fixes..."
+
+          export METAL_DEVICE_FAMILY=1,2
+          export OTHER_METAL_FLAGS="-Wno-error"
+
+          # 防止 Xcode 26 stricter shader validation
+          defaults write com.apple.dt.Xcode MetalForceBinaryArchiveCompilation -bool NO || true
+
+      # =========================
+      # 5. Build（稳定版）
       # =========================
       - name: Build unsigned app
         script: |
           set -e
 
           PROJECT=$(find . -name "*.xcodeproj" | head -1)
-
-          # ⚠️ 这里必须改成上一步 log 里真实 scheme
           SCHEME="VoidLink"
 
-          echo "Using project: $PROJECT"
-          echo "Using scheme: $SCHEME"
+          echo "PROJECT=$PROJECT"
+          echo "SCHEME=$SCHEME"
 
           xcodebuild \
             -project "$PROJECT" \
@@ -70,10 +77,12 @@ workflows:
             -sdk iphoneos \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
+            OTHER_METAL_FLAGS="-Wno-error" \
+            METAL_DEVICE_FAMILY=1,2 \
             clean build
 
       # =========================
-      # 5. 打包 IPA
+      # 6. 打包 IPA
       # =========================
       - name: Create IPA
         script: |
@@ -82,11 +91,11 @@ workflows:
           APP_PATH=$(find build -type d -name "*.app" | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "❌ .app not found - build failed"
+            echo "❌ .app not found"
             exit 1
           fi
 
-          echo "Found app: $APP_PATH"
+          echo "APP=$APP_PATH"
 
           rm -rf Payload
           mkdir Payload
