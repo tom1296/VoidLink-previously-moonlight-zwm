@@ -1,0 +1,99 @@
+workflows:
+  ios-unsigned-ipa:
+    name: VoidLink Stable Unsigned IPA
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+
+    triggering:
+      events:
+        - push
+
+    scripts:
+
+      # =========================
+      # 1. Submodule（安全初始化）
+      # =========================
+      - name: Init submodules (safe)
+        script: |
+          set -e
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      # =========================
+      # 2. 找到 Xcode 工程
+      # =========================
+      - name: Detect Xcode project
+        script: |
+          set -e
+
+          echo "=== FIND PROJECT FILES ==="
+          PROJECT=$(find . -name "*.xcodeproj" | head -1)
+
+          if [ -z "$PROJECT" ]; then
+            echo "❌ No .xcodeproj found"
+            exit 1
+          fi
+
+          echo "PROJECT = $PROJECT"
+
+      # =========================
+      # 3. 打印 scheme（关键）
+      # =========================
+      - name: Show schemes
+        script: |
+          set -e
+
+          PROJECT=$(find . -name "*.xcodeproj" | head -1)
+
+          echo "=== AVAILABLE SCHEMES ==="
+          xcodebuild -list -project "$PROJECT"
+
+      # =========================
+      # 4. 构建 IPA（未签名）
+      # =========================
+      - name: Build unsigned app
+        script: |
+          set -e
+
+          PROJECT=$(find . -name "*.xcodeproj" | head -1)
+
+          # ⚠️ 这里必须改成上一步 log 里真实 scheme
+          SCHEME="VoidLink"
+
+          echo "Using project: $PROJECT"
+          echo "Using scheme: $SCHEME"
+
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      # =========================
+      # 5. 打包 IPA
+      # =========================
+      - name: Create IPA
+        script: |
+          set -e
+
+          APP_PATH=$(find build -type d -name "*.app" | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ .app not found - build failed"
+            exit 1
+          fi
+
+          echo "Found app: $APP_PATH"
+
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+
+          zip -r VoidLink-unsigned.ipa Payload
+
+    artifacts:
+      - VoidLink-unsigned.ipa
+      - build/**/*.dSYM
